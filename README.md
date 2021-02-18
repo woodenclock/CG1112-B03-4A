@@ -1,5 +1,4 @@
 # CG1112-B03-4A
-AY20/21 CG1112 B03 Team 4A
 This is the codes to run ALEX, a mapping and rescue robot.
 
 Week 7
