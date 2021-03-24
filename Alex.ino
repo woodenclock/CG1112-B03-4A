@@ -38,6 +38,17 @@ volatile TDirection dir = STOP;
 #define LR                  10   // Left reverse pin
 #define RF                  11  // Right forward pin
 #define RR                  6 // Right reverse pin
+
+#define COLOUR_CHECK true
+int redFrequency = 0;
+int greenFrequency = 0;
+int count = 0;
+int red_ave = 100;
+int green_ave = 0;
+int color;
+int red;
+int green;
+
 #define PI 3.141592654
 #define ALEX_LENGTH  21
 #define ALEX_BREADTH 15
@@ -55,7 +66,6 @@ volatile TDirection dir = STOP;
 float AlexDiagonal = 0.0;
 
 float AlexCirc = 0.0;
-
 
 /*
       Alex's State Variables
@@ -214,6 +224,12 @@ void sendStatus()
   statusPacket.params[7] = rightReverseTicksTurns;
   statusPacket.params[8] = forwardDist;
   statusPacket.params[9] = reverseDist;
+  
+  if (COLOUR_CHECK) {
+    statusPacket.params[10] = color;
+    //statusPacket.params[10] = red;
+    //statusPacket.params[11] = green;
+  }
 
   sendResponse(&statusPacket);
 }
@@ -838,5 +854,47 @@ void loop() {
     sendBadChecksum();
   }
 
+   if (COLOUR_CHECK) { 
+  // Setting RED (R) filtered photodiodes to be read
+  digitalWrite(S2,LOW);
+  //digitalWrite(S3,LOW);
+  
+  // Reading the output frequency
+  redFrequency = pulseIn(sensorOut, LOW);
+  
+  // Setting GREEN (G) filtered photodiodes to be read
+  digitalWrite(S2,HIGH);
+  //digitalWrite(S3,HIGH);
+  
+  // Reading the output frequency
+  greenFrequency = pulseIn(sensorOut, LOW);
+
+  count += 1;
+  
+  if (count == 4) {
+    red_ave /= 5; 
+    green_ave /= 5;
+
+    red = red_ave;
+    green = green_ave;
+
+  if (red_ave < green_ave) {
+    color = 0;
+      //color = 100*red_ave;
+  }
+  else {
+    color = 1;
+      //color = 10000*green_ave;
+  }
+    
+    count = 0; // reset
+    red_ave = 0;
+    green_ave = 0;
+    
+  } else {
+    red_ave += redFrequency;
+    green_ave += greenFrequency;
+  }
+ }
 
 }
