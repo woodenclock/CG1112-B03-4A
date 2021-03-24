@@ -49,6 +49,8 @@ int color;
 int red;
 int green;
 
+#define IR_CHECK true
+
 #define PI 3.141592654
 #define ALEX_LENGTH  21
 #define ALEX_BREADTH 15
@@ -854,6 +856,30 @@ void loop() {
     sendBadChecksum();
   }
 
+  if (IR_CHECK){
+//reading IR sensors
+  front_out = digitalRead(FRONT);
+  back_out = digitalRead(BACK);
+  left_out = digitalRead(LEFT);
+  right_out = digitalRead(RIGHT);
+  
+  if(front_out == 0){
+    stop();
+    delay(50);
+    reverse(2);
+    delay(50);
+    IR = 0;
+    //sendStatus();
+  }  
+  else if(back_out == 0){
+    stop();
+    delay(50);
+    forward(2);
+    delay(50);
+    IR = 1;
+    //sendStatus();
+  }
+    
    if (COLOUR_CHECK) { 
   // Setting RED (R) filtered photodiodes to be read
   digitalWrite(S2,LOW);
