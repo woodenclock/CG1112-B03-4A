@@ -924,3 +924,39 @@ void loop() {
  }
 
 }
+
+/*
+GRAVEYARD
+
+
+void checkIR () {
+  int right = HIGH;
+  int left = HIGH;
+  right = digitalRead(RIGHT_IR);
+  left = digitalRead(LEFT_IR);
+  
+  if (right == LOW) {
+    analogWrite(LF, 0);
+    analogWrite(RF, 0);
+    analogWrite(LR, 0);
+    analogWrite(RR, 0);
+    right = HIGH;
+    }
+
+  if (left == LOW){
+    analogWrite(LF, 0);
+    analogWrite(RF, 0);
+    analogWrite(LR, 0);
+    analogWrite(RR, 0);
+    left = HIGH;
+  } 
+}
+
+void printIR() {
+  if (digitalRead(RIGHT_IR == HIGH)) {
+    dbprintf("RIGHT OBSTACLE");
+  }
+  if (digitalRead(LEFT_IR == HIGH)) {
+    dbprintf("LEFT OBSTACLE");
+  }
+}
