@@ -1,11 +1,15 @@
-#include "serialize.h"
+  #include "serialize.h"
 #include "packet.h"
 #include "constants.h"
+#include "pitches.h"
+#include <Adafruit_TCS34725.h>
+#include <Wire.h>
 #include <math.h>
 #include <avr/sleep.h>
+#include <Arduino.h>
+#include <stdarg.h>
 
-typedef enum
-{
+typedef enum {
   STOP = 0,
   FORWARD = 1,
   BACKWARD = 2,
@@ -15,64 +19,32 @@ typedef enum
 
 volatile TDirection dir = STOP;
 
-#include <Arduino.h>
-#include <stdarg.h>
-
-/*
-   Alex's configuration constants
-*/
-
 // Number of ticks per revolution from the
 // wheel encoder.
-
-#define COUNTS_PER_REV      420
 // Wheel circumference in cm.
 // We will use this to calculate forward/backward distance traveled
-// by taking revs * WHEEL_CIRC
-
-#define WHEEL_CIRC          20 // Approx.
+// by taking revs * WHEEL_CIR
+#define COUNTS_PER_REV      100      //48*4 = 192
+#define WHEEL_CIRC          20.5
 
 // Motor control pins. You need to adjust these till
 // Alex moves in the correct direction
 #define LF                  5   // Left forward pin
-#define LR                  10   // Left reverse pin
+#define LR                  6   // Left reverse pin
 #define RF                  11  // Right forward pin
-#define RR                  6 // Right reverse pin
+#define RR                  10 // Right reverse pin
+#define ALEX_LENGTH  19
+#define ALEX_BREADTH 13
+//#define PI 3.141592654
 
-#define COLOUR_CHECK true
-int redFrequency = 0;
-int greenFrequency = 0;
-int count = 0;
-int red_ave = 100;
-int green_ave = 0;
-int color;
-int red;
-int green;
-
-#define IR_CHECK true
-
-#define PI 3.141592654
-#define ALEX_LENGTH  21
-#define ALEX_BREADTH 15
-
-#define PRR_TWI_MASK      0b10000000
-#define PRR_SPI_MASK      0b00000100
-#define ADCSRA_ADC_MASK   0b10000000
-#define PRR_ADC_MASK      0b00000001
-#define PRR_TIMER2_MASK   0b01000000
-#define PRR_TIMER0_MASK   0b00100000
-#define PRR_TIMER1_MASK   0b00001000
-#define SMCR_SLEEP_ENABLE_MASK 0b00000001
-#define SMCR_IDLE_MODE_MASK    0b11110111
+//Color Detection
+char color;
+Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_700MS, TCS34725_GAIN_1X);
 
 float AlexDiagonal = 0.0;
-
 float AlexCirc = 0.0;
 
-/*
-      Alex's State Variables
-*/
-
+//Alex's State Variables
 // Store the ticks from Alex's left and
 // right encoders for moving forwards and backwards.
 volatile unsigned long leftForwardTicks;
@@ -90,102 +62,61 @@ volatile unsigned long rightReverseTicksTurns;
 // and right wheels
 volatile unsigned long leftRevs;
 volatile unsigned long rightRevs;
+
 // Forward and backward distance traveled
 volatile unsigned long forwardDist;
 volatile unsigned long reverseDist;
+
 //Variable to keep track of whether we have moved a commanded distance
 unsigned long deltaDist;
 unsigned long newDist;
+
 //Variables to keep track of our turning angle
 unsigned long deltaTicks;
 unsigned long targetTicks;
 
-// // watchdog thing
-// void WDT_off(void) {
-//   MCUSR &= ~(1<<WDRF);
-//   WDTCSR |= (1<<WDCE) | (1<<WDE);
-//   WDTCSR = 0x00;
-// }
+//Song
+//volatile int sound;
 
-void WDT_off(void)
-{
-  /* Global interrupt should be turned OFF here if not already done so */
-  /* Clear WDRF in MCUSR */
-  MCUSR &= ~(1 << WDRF);
-  /* Write logical one to WDCE and WDE */
-  /* Keep old prescaler setting to prevent unintentional time-out */
-  WDTCSR |= (1 << WDCE) | (1 << WDE);
-  /* Turn off WDT */
-  WDTCSR = 0x00;
-  /* Global interrupt should be turned ON here if subsequent operations after calling this function do not require turning off global interrupt */
-}
 
-// void setupPowerSaving()
-// {
-//   // Turn off the Watchdog Timer
-//   WDT_off();
-//   // Modify PRR to shut down TWI
-//   PRR |= PRR_TWI_MASK;
-//   // Modify PRR to shut down SPI
-//   PRR |= PRR_SPI_MASK;
-//   // Modify ADCSRA to disable ADC,
-//   ADCSRA &= ~ADCSRA_ADC_MASK;
-//   // then modify PRR to shut down ADC
-//   PRR |= PRR_ADC_MASK;
-//   // Set the SMCR to choose the IDLE sleep mode
-//   SMCR &= SMCR_IDLE_MODE_MASK;
-//   // Do not set the Sleep Enable (SE) bit yet
-
-//   // Set Port B Pin 5 as output pin, then write a logic LOW
-//   DDRB |= 0b00100000;
-//   // to it so that the LED tied to Arduino's Pin 13 is OFF.
-//   PORTB &= 0b11011111;
-// }
+//#define PRR_TWI_MASK            0b10000000          //Bit-7 is I2C Change to 0
+#define PRR_SPI_MASK            0b00000100
+#define ADCSRA_ADC_MASK         0b10000000
+#define PRR_ADC_MASK            0b00000001
+#define PRR_TIMER2_MASK         0b01000000
+#define PRR_TIMER0_MASK         0b00100000
+#define PRR_TIMER1_MASK         0b00001000
+#define SMCR_SLEEP_ENABLE_MASK  0b00000001
+#define SMCR_IDLE_MODE_MASK     0b11110111
 
 // setup power saving
 void setupPowerSaving() {
-  // Turn off the Watchdog Timer
   WDT_off();
-  // Modify PRR to shut down TWI
-  PRR |= PRR_TWI_MASK;
-  // Modify PRR to shut down SPI
+  //PRR |= PRR_TWI_MASK;      //To enable I2C for Color Sensor
   PRR |= PRR_SPI_MASK;
-  // Modify ADCSRA to disable ADC
-  ADCSRA |= ADCSRA_ADC_MASK;
-  // Modify PRR to shut down ADC
   PRR |= PRR_ADC_MASK;
-  // Set the SMCR to choose the IDLE sleep mode
-  SMCR &= 0b11110000;
-  // Set Port B Pin 5 as output pin, then write a logic LOW
-  DDRB |= 0b00100000;
-  // LED tied to Arduino's Pin 13 is OFF.
-  PORTB &= 110111111;
+  ADCSRA |= ADCSRA_ADC_MASK;
+  SMCR &= 0b11110000;         //Sleep not Enabled yet
+  DDRB |= 0b00100000;         //Pin 5 is OUTPUT
+  PORTB &= 110111111;         //Pin 5 LOW   So that LED tied to Arduino's Pin 13 is OFF
 }
 
-// void putArduinoToIdle() {
-//   PRR |= 0b01101000;
-//   SMCR |= SMCR_SLEEP_ENABLE_MASK;
-//   sleep_cpu();
-//   SMCR &= 0b11110000;
-//   PRR &= 0b10010111;
-// }
+// watchdog thing
+void WDT_off(void) {
+  MCUSR &= ~(1<<WDRF);
+  WDTCSR |= (1<<WDCE) | (1<<WDE);
+  WDTCSR = 0x00;
+}
 
-void putArduinoToIdle()
-{
-  // Modify PRR to shut down TIMER 0, 1, and 2
-  PRR |= (PRR_TIMER0_MASK | PRR_TIMER1_MASK | PRR_TIMER2_MASK);
-  // Modify SE bit in SMCR to enable (i.e., allow) sleep
-  SMCR |= SMCR_SLEEP_ENABLE_MASK;
-  // This function puts ATmega328P’s MCU into sleep
+void putArduinoToIdle() {
+  PRR |= 0b01101000;                //I2C is Enbled for Colour Sensor
+  SMCR |= SMCR_SLEEP_ENABLE_MASK;   //Idle is Enabled
   sleep_cpu();
-  // Modify SE bit in SMCR to disable (i.e., disallow) sleep
-  SMCR &= ~SMCR_SLEEP_ENABLE_MASK;
-  // Modify PRR to power up TIMER 0, 1, and 2
-  PRR &= ~(PRR_TIMER0_MASK | PRR_TIMER1_MASK | PRR_TIMER2_MASK);
+  SMCR &= 0b11110000;
+  PRR &= 0b00010111;                //Changed Bit 7 to enable I2C
 }
 
-TResult readPacket(TPacket *packet)
-{
+TResult readPacket(TPacket *packet) {
   // Reads in data from the serial port and
   // deserializes it.Returns deserialized
   // data in "packet".
@@ -202,8 +133,7 @@ TResult readPacket(TPacket *packet)
 
 }
 
-void sendStatus()
-{
+void sendStatus() {
   // Implement code to send back a packet containing key
   // information like leftTicks, rightTicks, leftRevs, rightRevs
   // forwardDist and reverseDist
@@ -226,41 +156,34 @@ void sendStatus()
   statusPacket.params[7] = rightReverseTicksTurns;
   statusPacket.params[8] = forwardDist;
   statusPacket.params[9] = reverseDist;
-  
-  if (COLOUR_CHECK) {
-    statusPacket.params[10] = color;
-    //statusPacket.params[10] = red;
-    //statusPacket.params[11] = green;
-  }
+  statusPacket.params[10] = color;
 
   sendResponse(&statusPacket);
 }
 
-void sendMessage(const char *message)
-{
+
+void sendMessage(const char *message) {
   // Sends text messages back to the Pi. Useful
   // for debugging.
-
   TPacket messagePacket;
   messagePacket.packetType = PACKET_TYPE_MESSAGE;
   strncpy(messagePacket.data, message, MAX_STR_LEN);
   sendResponse(&messagePacket);
 }
 
+
+
 void dbprintf(char *format, ...) {
   va_list args;
   char buffer[128];
-
   va_start(args, format);
   vsprintf(buffer, format, args);
   sendMessage(buffer);
 }
 
-void sendBadPacket()
-{
+void sendBadPacket() {
   // Tell the Pi that it sent us a packet with a bad
   // magic number.
-
   TPacket badPacket;
   badPacket.packetType = PACKET_TYPE_ERROR;
   badPacket.command = RESP_BAD_PACKET;
@@ -268,52 +191,43 @@ void sendBadPacket()
 
 }
 
-void sendBadChecksum()
-{
+void sendBadChecksum() {
   // Tell the Pi that it sent us a packet with a bad
   // checksum.
-
   TPacket badChecksum;
   badChecksum.packetType = PACKET_TYPE_ERROR;
   badChecksum.command = RESP_BAD_CHECKSUM;
   sendResponse(&badChecksum);
 }
 
-void sendBadCommand()
-{
+void sendBadCommand() {
   // Tell the Pi that we don't understand its
   // command sent to us.
-
   TPacket badCommand;
   badCommand.packetType = PACKET_TYPE_ERROR;
   badCommand.command = RESP_BAD_COMMAND;
   sendResponse(&badCommand);
-
 }
 
-void sendBadResponse()
-{
+void sendBadResponse() {
   TPacket badResponse;
   badResponse.packetType = PACKET_TYPE_ERROR;
   badResponse.command = RESP_BAD_RESPONSE;
   sendResponse(&badResponse);
 }
 
-void sendOK()
-{
+void sendOK() {
   TPacket okPacket;
   okPacket.packetType = PACKET_TYPE_RESPONSE;
   okPacket.command = RESP_OK;
   sendResponse(&okPacket);
 }
 
-void sendResponse(TPacket *packet)
-{
+void sendResponse(TPacket *packet) {
   // Takes a packet, serializes it then sends it out
   // over the serial port.
   char buffer[PACKET_SIZE];
   int len;
-
   len = serialize(buffer, packet, sizeof(TPacket));
   writeSerial(buffer, len);
 }
@@ -325,65 +239,54 @@ void sendResponse(TPacket *packet)
 
 */
 // Enable pull up resistors on pins 2 and 3
-void enablePullups()
-{
+void enablePullups() {
   DDRD &= 0b11110011;
   PORTD |= 0b00001100;
   // Use bare-metal to enable the pull-up resistors on pins
   // 2 and 3. These are pins PD2 and PD3 respectively.
   // We set bits 2 and 3 in DDRD to 0 to make them inputs.
-
 }
 
 // Functions to be called by INT0 and INT1 ISRs.
-void leftISR()
-{
+void leftISR() {
   if (dir == FORWARD) {
     leftForwardTicks++;
-    forwardDist = (unsigned long) ((float) leftForwardTicks / COUNTS_PER_REV * WHEEL_CIRC);
+    forwardDist = (unsigned long) ((float) leftForwardTicks / COUNTS_PER_REV * (float) WHEEL_CIRC);
   }
-
-  if (dir == BACKWARD) {
+  else if (dir == BACKWARD) {
     leftReverseTicks++;
-    reverseDist = (unsigned long) ((float) leftReverseTicks / COUNTS_PER_REV * WHEEL_CIRC);
+    reverseDist = (unsigned long) ((float) leftReverseTicks / COUNTS_PER_REV * (float) WHEEL_CIRC);
   }
-
-  if (dir == LEFT) {
-    rightForwardTicksTurns++;
+  else if (dir == LEFT){
     leftReverseTicksTurns++;
   }
-  //Serial.print("LEFT: ");
-  //Serial.println(leftTicks);
+  else if (dir == RIGHT){
+    leftForwardTicksTurns++;
+  }
 }
 
-void rightISR()
-{
+void rightISR() {
   if (dir == FORWARD) {
     rightForwardTicks++;
     //dbprintf("%s", "RIGHT: ");
     //dbprintf("%ld \n", rightForwardTicks);
   }
-
-  if (dir == BACKWARD) {
+  else if (dir == BACKWARD) {
     rightReverseTicks++;
     //dbprintf("%s", "LEFT: ");
     //dbprintf("%ld \n", rightReverseTicks);
   }
-
-
-  if (dir == RIGHT) {
-    leftForwardTicksTurns++;
-    rightReverseTicksTurns++;
-
+   else if (dir == LEFT){
+    rightForwardTicksTurns++;
   }
-  //  Serial.print("RIGHT: ");
-  //  Serial.println(rightTicks);
+  else if (dir == RIGHT){
+    rightReverseTicksTurns++;
+  }
 }
 
 // Set up the external interrupt pins INT0 and INT1
 // for falling edge triggered. Use bare-metal.
-void setupEINT()
-{
+void setupEINT() {
   // Use bare-metal to configure pins 2 and 3 to be
   // falling edge triggered. Remember to enable
   // the INT0 and INT1 interrupts.
@@ -415,7 +318,7 @@ ISR(INT1_vect) {
 // Set up the serial connection. For now we are using
 // Arduino Wiring, you will replace this later
 // with bare-metal code.
-void setupSerial()
+void setupSerial()        //////////////////////////////////////////////////
 {
   // To replace later with bare-metal.
    Serial.begin(9600);
@@ -424,8 +327,7 @@ void setupSerial()
 // Start the serial connection. For now we are using
 // Arduino wiring and this function is empty. We will
 // replace this later with bare-metal code.
-
-void startSerial()
+void startSerial()        //////////////////////////////////////////////////
 {
   // Empty for now. To be replaced with bare-metal code
   // later on.
@@ -435,21 +337,15 @@ void startSerial()
 // Read the serial port. Returns the read character in
 // ch if available. Also returns TRUE if ch is valid.
 // This will be replaced later with bare-metal code.
-
-int readSerial(char *buffer)
-{
-
+int readSerial(char *buffer) {
     int count=0;
-  
     while(Serial.available())
       buffer[count++] = Serial.read();
-  
     return count;
 }
 
 // Write to the serial port. Replaced later with
 // bare-metal code
-
 void writeSerial(const char *buffer, int len)
 {
   Serial.write (buffer, len);
@@ -474,15 +370,14 @@ void setupMotors()
   DDRB |= 0b00000100;
   DDRD |= 0b00100000;
   //OC0A = 25;
-  // OC0B = 25;
+  //OC0B = 25;
 
 }
 
 // Start the PWM for Alex's motors.
 // We will implement this later. For now it is
 // blank.
-void startMotors()
-{
+void startMotors() {
 
 }
 
@@ -503,14 +398,11 @@ int pwmVal(float speed)
 // move forward at half speed.
 // Specifying a distance of 0 means Alex will
 // continue moving forward indefinitely.
-void forward(float dist, float speed)
-{
+void forward(float dist, float speed) {
   dir = FORWARD;
 
-  int right_val = pwmVal(speed);
-  int left_val = pwmVal(speed + 10);
-
-
+  int right_val = pwmVal(speed - 12);
+  int left_val = pwmVal(speed);
 
   if (dist > 0)
     deltaDist = dist;
@@ -538,8 +430,10 @@ void forward(float dist, float speed)
 // reverse at half speed.
 // Specifying a distance of 0 means Alex will
 // continue reversing indefinitely.
-void reverse(float dist, float speed)
-{
+void reverse(float dist, float speed) {
+
+  int right_val = pwmVal(speed - 12);
+  int left_val = pwmVal(speed);
   if (dist > 0)
     deltaDist = dist;
   else
@@ -557,8 +451,8 @@ void reverse(float dist, float speed)
   // LF = Left forward pin, LR = Left reverse pin
   // RF = Right forward pin, RR = Right reverse pin
   // This will be replaced later with bare-metal code.
-  analogWrite(LR, val);
-  analogWrite(RR, val);
+  analogWrite(LR, left_val);
+  analogWrite(RR, right_val);
   analogWrite(LF, 0);
   analogWrite(RF, 0);
 }
@@ -574,23 +468,23 @@ unsigned long computeDeltaTicks (float ang) {
 // turn left at half speed.
 // Specifying an angle of 0 degrees will cause Alex to
 // turn left indefinitely.
-void left(float ang, float speed)
-{ int val = pwmVal(speed);
+void left(float ang, float speed) {
+
+
+  if (ang > 0)
+    deltaTicks = computeDeltaTicks(ang)* 0.3;
+  else
+    deltaTicks = 99999999;
 
   dir = LEFT;
-
-  if (ang == 0)
-    deltaTicks = 99999999;
-  else
-    deltaTicks = computeDeltaTicks(ang);
-    targetTicks = leftReverseTicksTurns + deltaTicks;
-
-
+  int val = pwmVal(speed);
+  targetTicks = leftReverseTicksTurns + deltaTicks;
+  
   // For now we will ignore ang. We will fix this in Week 9.
   // We will also replace this code with bare-metal later.
   // To turn left we reverse the left wheel and move
   // the right wheel forward.
-  analogWrite(LR, val);
+  analogWrite(LR, val);//220
   analogWrite(RF, val);
   analogWrite(LF, 0);
   analogWrite(RR, 0);
@@ -601,18 +495,19 @@ void left(float ang, float speed)
 // turn left at half speed.
 // Specifying an angle of 0 degrees will cause Alex to
 // turn right indefinitely.
-void right(float ang, float speed)
-{
-  dir = RIGHT;
+void right(float ang, float speed) {
+//int right_val = pwmVal(speed - 12);
+//  int left_val = pwmVal(speed);
 
-  int val = pwmVal(speed);
-
-  if (ang == 0)
-    deltaTicks = 99999999;
+ if (ang > 0)
+    deltaTicks = computeDeltaTicks(ang) * 0.3;
   else
-    deltaTicks = computeDeltaTicks(ang);
-  targetTicks = rightReverseTicksTurns + deltaTicks;
-
+    deltaTicks = 99999999;
+  
+  dir = RIGHT;
+  int val = pwmVal(speed);
+  targetTicks = rightReverseTicksTurns + deltaTicks + 40;
+  
   // For now we will ignore ang. We will fix this in Week 9.
   // We will also replace this code with bare-metal later.
   // To turn right we reverse the right wheel and move
@@ -624,12 +519,17 @@ void right(float ang, float speed)
 }
 
 // Stop Alex. To replace with bare-metal code later.
-void stop()
-{
+void stop() {
+  dir = STOP;
+//  sound = 0;
   analogWrite(LF, 0);
   analogWrite(LR, 0);
   analogWrite(RF, 0);
   analogWrite(RR, 0);
+//  OCR0A = 0;
+//  OCR0B = 0;
+//  OCR1B = 0;
+//  OCR1B = 0;
 }
 
 /*
@@ -652,29 +552,30 @@ void clearCounters()
   rightRevs = 0;
   forwardDist = 0;
   reverseDist = 0;
+  color = 'N';
 }
 
 // Clears one particular counter
-void clearOneCounter(int which)
-{
+void clearOneCounter(int which) {
   clearCounters();
 }
 // Intialize Vincet's internal states
 
-void initializeState()
-{
+void initializeState() {
   clearCounters();
 }
 
-void handleCommand(TPacket *command)
-{
-  switch (command->command)
-  {
+void handleCommand(TPacket *command) {
+  switch (command->command) {
     // For movement commands, param[0] = distance, param[1] = speed.
     case COMMAND_FORWARD:
       sendOK();
       forward((float) command->params[0], (float) command->params[1]);
       break;
+    case COMMAND_REVERSE:
+      sendOK();
+      reverse((float) command->params[0], (float) command->params[1]);
+      break;  
     case COMMAND_TURN_LEFT:
       sendOK();
       left((float) command->params[0], (float) command->params[1]);
@@ -684,58 +585,120 @@ void handleCommand(TPacket *command)
       right((float) command->params[0], (float) command->params[1]);
       break;
     case COMMAND_STOP:
+      //sound = 0;
       sendOK();
       stop();
       break;
-    case COMMAND_REVERSE:
-      sendOK();
-      reverse((float) command->params[0], (float) command->params[1]);
-      break;
-
     case COMMAND_GET_STATS:
       sendOK();
       dbprintf("GET STATUS");
+      check_colour();
       sendStatus();
       break;
-
     case COMMAND_CLEAR_STATS:
       sendOK();
       clearOneCounter(command->params[0]);
       break;
 
+   case COMMAND_PLAY:
+      sendOK();
+      dbprintf("Playing Song");
+      //sound = 1;
+      play();
+      break; 
+      
     default:
       sendBadCommand();
   }
 }
 
-void waitForHello()
-{
+void check_colour() {
+  uint16_t r, g, b, c;
+  tcs.getRawData(&r, &g, &b, &c);
+      
+  if (r > g && r > b)  //&& g <= 50 && b <= 50)
+     color = 'R';
+  else if (g > r && g > b) //&& r <= 50 && b <= 50)
+     color = 'G';
+  else 
+     color = 'N';
+}
+
+
+
+void play() {
+  
+  int melody[] = {
+  NOTE_G4, 0, NOTE_G4, NOTE_D5,
+  NOTE_C5, 0, NOTE_AS4, 0,
+  NOTE_A4, 0, NOTE_A4, NOTE_A4,
+  NOTE_C5, 0, NOTE_AS4, NOTE_A4, 
+  NOTE_G4,0, NOTE_G4, NOTE_AS5,
+  NOTE_A5, NOTE_AS5, NOTE_A5, NOTE_AS5,
+  NOTE_G4,0, NOTE_G4, NOTE_AS5,
+  NOTE_A5, NOTE_AS5, NOTE_A5, NOTE_AS5,
+
+  NOTE_AS4, NOTE_AS4, NOTE_AS4, NOTE_AS4,
+  NOTE_D5, NOTE_D5, NOTE_D5, NOTE_D5,
+  NOTE_C5, NOTE_C5, NOTE_C5, NOTE_C5, 
+  NOTE_F5, NOTE_F5, NOTE_F5, NOTE_F5, 
+  NOTE_G5, NOTE_G5, NOTE_G5, NOTE_G5,
+  NOTE_G5, NOTE_G5, NOTE_G5, NOTE_G5, 
+  NOTE_G5, NOTE_G5, NOTE_G5, NOTE_G5, 
+  NOTE_C5, NOTE_AS4, NOTE_A4, NOTE_F4
+ };
+ 
+  // note durations: 4 = quarter note, 8 = eighth note, etc.:
+  int noteDurations[] = {
+    4,4,4,4,
+    4,4,4,4,
+    4,4,4,4,
+    4,4,4,4,
+    4,4,4,4,
+    4,4,4,4,
+    4,4,4,4,
+    4,4,4,4,
+  
+//    4,4,4,4,
+//    4,4,4,4,
+//    4,4,4,4,
+//    4,4,4,4,
+//    4,4,4,4,
+//    4,4,4,4,
+//    4,4,4,4,
+//    4,4,4,4
+  };
+  
+  for (int thisNote = 0; thisNote < 32; thisNote++) {
+    int noteDuration = 500 / noteDurations[thisNote];
+    tone(12, melody[thisNote], noteDuration);
+    int pauseBetweenNotes = noteDuration * 1.30;
+    delay(pauseBetweenNotes);
+    noTone(12);
+  }
+}
+
+void waitForHello() {
   int exit = 0;
 
-  while (!exit)
-  {
+  while (!exit) {
     TPacket hello;
     TResult result;
-
-    do
-    {
+  
+    do {
       result = readPacket(&hello);
-    } while (result == PACKET_INCOMPLETE);
+    } 
+    while (result == PACKET_INCOMPLETE);
 
-    if (result == PACKET_OK)
-    {
-      if (hello.packetType == PACKET_TYPE_HELLO)
-      {
-
-
+    if (result == PACKET_OK) {
+      if (hello.packetType == PACKET_TYPE_HELLO) {
         sendOK();
         exit = 1;
       }
       else
         sendBadResponse();
     }
-    else if (result == PACKET_BAD)
-    {
+    else if (result == PACKET_BAD) {
       sendBadPacket();
     }
     else if (result == PACKET_CHECKSUM_BAD)
@@ -743,13 +706,15 @@ void waitForHello()
   } // !exit
 }
 
+
+
 void setup() {
   // put your setup code here, to run once:
-
+  // tcs.begin();
   //Compute the diagonal
   AlexDiagonal = sqrt((ALEX_LENGTH * ALEX_LENGTH) + (ALEX_BREADTH * ALEX_BREADTH));
   AlexCirc = PI * AlexDiagonal;
-  cli();
+  cli();  
   setupEINT();
   setupSerial();
   startSerial();
@@ -758,13 +723,16 @@ void setup() {
   startMotors();
   enablePullups();
   initializeState();
+
+//  sound = 0;
+  PRR &= 0b01111111;            //Enabled I2C
   sei();
 }
 
-void handlePacket(TPacket *packet)
-{
-  switch (packet->packetType)
-  {
+
+
+void handlePacket(TPacket *packet) {
+  switch (packet->packetType) {
     case PACKET_TYPE_COMMAND:
       handleCommand(packet);
       break;
@@ -784,10 +752,22 @@ void handlePacket(TPacket *packet)
 }
 
 void loop() {
-  if (dir == STOP) {
-    putArduinoToIdle();
+  TPacket recvPacket; // This holds commands from the Pi
+  TResult result = readPacket(&recvPacket);
+
+  if (result == PACKET_OK) {
+    handlePacket(&recvPacket);
   }
-  if (deltaDist > 0) {
+    
+  else if (result == PACKET_BAD) {
+    sendBadPacket();
+  }
+  
+  else if (result == PACKET_CHECKSUM_BAD) {
+    sendBadChecksum();
+  }
+  
+  if(deltaDist > 0) {
     if (dir == FORWARD) {
       if (forwardDist > newDist) {
         deltaDist = 0;
@@ -795,16 +775,16 @@ void loop() {
         stop();
       }
     }
-    else if (dir == BACKWARD) {
-      if (reverseDist > newDist) {
+    else if(dir==BACKWARD) {
+      if(reverseDist > newDist) {
         deltaDist = 0;
         newDist = 0;
         stop();
       }
     }
     else if (dir == STOP) {
-      deltaDist = 0;
-      newDist = 0;
+      deltaTicks = 0;
+      targetTicks = 0;
       stop();
     }
   }
@@ -817,146 +797,17 @@ void loop() {
         stop();
       }
     }
-
-    else
-
-      if (dir == RIGHT) {
-        if (rightReverseTicksTurns >= targetTicks) {
-          deltaTicks = 0;
-          targetTicks = 0;
-          stop();
-        }
-      }
-      else if (dir == STOP) {
+    else if (dir == RIGHT) {
+      if (rightReverseTicksTurns >= targetTicks) {
         deltaTicks = 0;
         targetTicks = 0;
         stop();
       }
-  }
-  // Uncomment the code below for Step 2 of Activity 3 in Week 8 Studio 2
-
-  //forward(0, 70);
-
-
-  // Uncomment the code below for Week 9 Studio 2
-
-  // put your main code here, to run repeatedly:
-  TPacket recvPacket; // This holds commands from the Pi
-
-  TResult result = readPacket(&recvPacket);
-
-  if (result == PACKET_OK)
-    handlePacket(&recvPacket);
-  else if (result == PACKET_BAD)
-  {
-    sendBadPacket();
-  }
-  else if (result == PACKET_CHECKSUM_BAD)
-  {
-    sendBadChecksum();
-  }
-
-  if (IR_CHECK){
-//reading IR sensors
-  front_out = digitalRead(FRONT);
-  back_out = digitalRead(BACK);
-  left_out = digitalRead(LEFT);
-  right_out = digitalRead(RIGHT);
-  
-  if(front_out == 0){
-    stop();
-    delay(50);
-    reverse(2);
-    delay(50);
-    IR = 0;
-    //sendStatus();
-  }  
-  else if(back_out == 0){
-    stop();
-    delay(50);
-    forward(2);
-    delay(50);
-    IR = 1;
-    //sendStatus();
-  }
-    
-   if (COLOUR_CHECK) { 
-  // Setting RED (R) filtered photodiodes to be read
-  digitalWrite(S2,LOW);
-  //digitalWrite(S3,LOW);
-  
-  // Reading the output frequency
-  redFrequency = pulseIn(sensorOut, LOW);
-  
-  // Setting GREEN (G) filtered photodiodes to be read
-  digitalWrite(S2,HIGH);
-  //digitalWrite(S3,HIGH);
-  
-  // Reading the output frequency
-  greenFrequency = pulseIn(sensorOut, LOW);
-
-  count += 1;
-  
-  if (count == 4) {
-    red_ave /= 5; 
-    green_ave /= 5;
-
-    red = red_ave;
-    green = green_ave;
-
-  if (red_ave < green_ave) {
-    color = 0;
-      //color = 100*red_ave;
-  }
-  else {
-    color = 1;
-      //color = 10000*green_ave;
-  }
-    
-    count = 0; // reset
-    red_ave = 0;
-    green_ave = 0;
-    
-  } else {
-    red_ave += redFrequency;
-    green_ave += greenFrequency;
-  }
- }
-
-}
-
-/*
-GRAVEYARD
-
-
-void checkIR () {
-  int right = HIGH;
-  int left = HIGH;
-  right = digitalRead(RIGHT_IR);
-  left = digitalRead(LEFT_IR);
-  
-  if (right == LOW) {
-    analogWrite(LF, 0);
-    analogWrite(RF, 0);
-    analogWrite(LR, 0);
-    analogWrite(RR, 0);
-    right = HIGH;
     }
-
-  if (left == LOW){
-    analogWrite(LF, 0);
-    analogWrite(RF, 0);
-    analogWrite(LR, 0);
-    analogWrite(RR, 0);
-    left = HIGH;
-  } 
-}
-
-void printIR() {
-  if (digitalRead(RIGHT_IR == HIGH)) {
-    dbprintf("RIGHT OBSTACLE");
-  }
-  if (digitalRead(LEFT_IR == HIGH)) {
-    dbprintf("LEFT OBSTACLE");
-  }
+    else if (dir == STOP) {
+      deltaTicks = 0;
+      targetTicks = 0;
+      stop();
+    }
+  }    
 }
