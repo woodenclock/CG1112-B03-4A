@@ -226,6 +226,13 @@ void sendCommand(char command)
 			commandPacket.command = COMMAND_GET_STATS;
 			sendPacket(&commandPacket);
 			break;
+			
+		case 'p':
+		case 'P':
+			getParams(&commandPacket);
+			commandPacket.command = COMMAND_PLAY;
+			sendPacket(&commandPacket);
+			break;
 
 		case 'q':
 		case 'Q':
