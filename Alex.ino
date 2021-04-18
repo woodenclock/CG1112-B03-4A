@@ -75,9 +75,6 @@ unsigned long newDist;
 unsigned long deltaTicks;
 unsigned long targetTicks;
 
-//Song
-//volatile int sound;
-
 
 //#define PRR_TWI_MASK            0b10000000          //Bit-7 is I2C Change to 0
 #define PRR_SPI_MASK            0b00000100
@@ -92,7 +89,7 @@ unsigned long targetTicks;
 // setup power saving
 void setupPowerSaving() {
   WDT_off();
-  //PRR |= PRR_TWI_MASK;      //To enable I2C for Color Sensor
+  //PRR |= PRR_TWI_MASK;      //To enable I2C for  Sensor
   PRR |= PRR_SPI_MASK;
   PRR |= PRR_ADC_MASK;
   ADCSRA |= ADCSRA_ADC_MASK;
@@ -432,7 +429,7 @@ void forward(float dist, float speed) {
 // continue reversing indefinitely.
 void reverse(float dist, float speed) {
 
-  int right_val = pwmVal(speed - 12);
+  int right_val = pwmVal(speed - 10);
   int left_val = pwmVal(speed);
   if (dist > 0)
     deltaDist = dist;
@@ -506,7 +503,7 @@ void right(float ang, float speed) {
   
   dir = RIGHT;
   int val = pwmVal(speed);
-  targetTicks = rightReverseTicksTurns + deltaTicks + 40;
+  targetTicks = rightReverseTicksTurns + deltaTicks + 30;
   
   // For now we will ignore ang. We will fix this in Week 9.
   // We will also replace this code with bare-metal later.
@@ -521,15 +518,12 @@ void right(float ang, float speed) {
 // Stop Alex. To replace with bare-metal code later.
 void stop() {
   dir = STOP;
-//  sound = 0;
   analogWrite(LF, 0);
   analogWrite(LR, 0);
   analogWrite(RF, 0);
   analogWrite(RR, 0);
-//  OCR0A = 0;
-//  OCR0B = 0;
-//  OCR1B = 0;
-//  OCR1B = 0;
+  putArduinoToIdle();
+
 }
 
 /*
@@ -585,7 +579,6 @@ void handleCommand(TPacket *command) {
       right((float) command->params[0], (float) command->params[1]);
       break;
     case COMMAND_STOP:
-      //sound = 0;
       sendOK();
       stop();
       break;
@@ -603,7 +596,6 @@ void handleCommand(TPacket *command) {
    case COMMAND_PLAY:
       sendOK();
       dbprintf("Playing Song");
-      //sound = 1;
       play();
       break; 
       
@@ -613,15 +605,17 @@ void handleCommand(TPacket *command) {
 }
 
 void check_colour() {
-  uint16_t r, g, b, c;
-  tcs.getRawData(&r, &g, &b, &c);
+  float r, g, b, c;
+  tcs.getRGB(&r, &g, &b);
       
-  if (r > g && r > b)  //&& g <= 50 && b <= 50)
+  if (r > g && r > b)//(r >= 110 && g <= 80 && b <= 60)  //&& g <= 50 && b <= 50)
      color = 'R';
-  else if (g > r && g > b) //&& r <= 50 && b <= 50)
+  else if ((g - 10 >= r && g >= b)) //&& r <= 50 && b <= 50)
      color = 'G';
-  else 
+   else //if ((r >= 80) && (g >= 88 && g <= 91) && (b >= 62 && b <= 65))
      color = 'N';
+
+
 }
 
 
@@ -724,7 +718,6 @@ void setup() {
   enablePullups();
   initializeState();
 
-//  sound = 0;
   PRR &= 0b01111111;            //Enabled I2C
   sei();
 }
