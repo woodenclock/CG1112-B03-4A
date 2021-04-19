@@ -1,5 +1,5 @@
 # CG1112-B03-4A
-This is the codes to run ALEX, a mapping and rescue robot.
+These are the codes to run ALEX, a mapping and rescue robot.
 
 Week 7
 6th March, 2359
